@@ -1,0 +1,73 @@
+/* Reunion Admin Style */
+
+.reunion-pagination {
+    margin-top: 15px;
+}
+
+.reunion-pagination .page-numbers {
+    display: inline-block;
+    padding: 8px 14px;
+    margin: 0 2px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #555;
+    background-color: #f7f7f7;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.reunion-pagination .page-numbers:hover {
+    background-color: #0073aa;
+    color: #fff;
+    border-color: #0073aa;
+}
+
+.reunion-pagination .page-numbers.current {
+    background-color: #0073aa;
+    color: #fff;
+    border-color: #0073aa;
+    font-weight: bold;
+}
+
+.reunion-pagination .page-numbers.dots {
+    border: none;
+    background: none;
+    padding: 8px 4px;
+}
+
+/* Settings Page Sidebar */
+#poststuff #post-body.columns-2 #postbox-container-1 {
+    float: right;
+    margin-right: -300px;
+    width: 280px;
+}
+#poststuff #post-body.columns-2 #post-body-content {
+    margin-right: 300px;
+}
+#poststuff #post-body #post-body-content {
+    margin-bottom: 0;
+}
+
+.page-numbers {
+    display: inline-block;
+    padding: 8px 14px;
+    margin: 0 2px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #ffffff;
+    background-color: #000874;
+    transition: background-color 0.3s, color 0.3s;
+}
+/* Reunion Admin Style */
+
+/* Reunion Admin Style */
+
+.reunion-pagination { margin-top: 15px; }
+.reunion-pagination .page-numbers { display: inline-block; padding: 8px 14px; margin: 0 2px; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #555; background-color: #f7f7f7; transition: background-color 0.3s, color 0.3s; }
+.reunion-pagination .page-numbers:hover { background-color: #0073aa; color: #fff; border-color: #0073aa; }
+.reunion-pagination .page-numbers.current { background-color: #0073aa; color: #fff; border-color: #0073aa; font-weight: bold; }
+.reunion-pagination .page-numbers.dots { border: none; background: none; padding: 8px 4px; }
+#poststuff #post-body.columns-2 #postbox-container-1 { float: right; margin-right: -300px; width: 280px; }
+#poststuff #post-body.columns-2 #post-body-content { margin-right: 300px; }
+#poststuff #post-body #post-body-content { margin-bottom: 0; }
