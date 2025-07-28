@@ -1,6 +1,6 @@
 <?php
 /**
- * SMS Integration Class for Reunion Registration Plugin
+ * SMS Integration Class for Reunion Registration Plugin - Complete Fixed Version
  * File: includes/class-reunion-sms.php
  */
 
@@ -227,7 +227,7 @@ class Reunion_SMS {
     }
     
     /**
-     * Get SMS balance
+     * Get SMS balance - FIXED VERSION
      */
     public function get_sms_balance() {
         $token = get_option('reunion_sms_token', '');
@@ -235,31 +235,61 @@ class Reunion_SMS {
             return ['status' => 'error', 'message' => 'SMS token not configured'];
         }
         
-        $url = "https://api.greenweb.com.bd/g_api.php?token={$token}&balance&json";
+        // Try different GreenWeb balance API endpoints
+        $balance_urls = [
+            "https://api.greenweb.com.bd/g_api.php?token={$token}&balance&json",
+            "https://api.greenweb.com.bd/api.php?token={$token}&balance",
+            "https://api.greenweb.com.bd/g_api.php?token={$token}&balance"
+        ];
         
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        
-        $response = curl_exec($ch);
-        $error = curl_error($ch);
-        curl_close($ch);
-        
-        if ($error) {
-            return ['status' => 'error', 'message' => 'CURL Error: ' . $error];
+        foreach ($balance_urls as $url) {
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+            
+            $response = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+            
+            if ($error) {
+                continue; // Try next URL
+            }
+            
+            if ($http_code === 200 && !empty($response)) {
+                // Clean the response
+                $response = trim($response);
+                
+                // Try to decode as JSON first
+                $json_result = json_decode($response, true);
+                
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    // JSON response
+                    if (is_array($json_result)) {
+                        if (isset($json_result['balance'])) {
+                            return ['status' => 'success', 'balance' => $json_result['balance']];
+                        } elseif (isset($json_result[0]['balance'])) {
+                            return ['status' => 'success', 'balance' => $json_result[0]['balance']];
+                        } elseif (isset($json_result['data']) && is_numeric($json_result['data'])) {
+                            return ['status' => 'success', 'balance' => $json_result['data']];
+                        }
+                    }
+                } else {
+                    // Plain text response
+                    if (is_numeric($response)) {
+                        return ['status' => 'success', 'balance' => $response];
+                    } elseif (preg_match('/(\d+\.?\d*)/', $response, $matches)) {
+                        return ['status' => 'success', 'balance' => $matches[1]];
+                    }
+                }
+            }
         }
         
-        $result = json_decode($response, true);
-        
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            // Try to parse as plain text
-            return ['status' => 'success', 'balance' => trim($response)];
-        }
-        
-        return ['status' => 'success', 'data' => $result];
+        return ['status' => 'error', 'message' => 'Unable to fetch SMS balance. Please check your token or try again later.'];
     }
     
     /**

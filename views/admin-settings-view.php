@@ -1,6 +1,6 @@
 <?php
 /**
- * Fixed Admin Settings View with All Original Features
+ * Complete Admin Settings View File
  * File: views/admin-settings-view.php
  */
 

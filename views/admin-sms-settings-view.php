@@ -1,4 +1,4 @@
-<!-- File: views/admin-sms-settings-view.php -->
+<!-- Complete SMS Settings View File - views/admin-sms-settings-view.php -->
 <div class="wrap">
     <h1><?php _e('SMS Settings', 'reunion-reg'); ?></h1>
     
@@ -51,10 +51,16 @@
                                     <th scope="row"><?php _e('SMS Balance', 'reunion-reg'); ?></th>
                                     <td>
                                         <div id="sms-balance-display">
-                                            <span class="spinner" style="float: none; margin: 0;"></span>
-                                            <span id="balance-text"><?php _e('Click to check balance', 'reunion-reg'); ?></span>
+                                            <span class="spinner" style="float: none; margin: 0; display: none;"></span>
+                                            <span id="balance-text" style="font-weight: bold; color: #0073aa;"><?php _e('Click to check balance', 'reunion-reg'); ?></span>
                                         </div>
-                                        <button type="button" class="button" id="check-balance-btn"><?php _e('Check Balance', 'reunion-reg'); ?></button>
+                                        <div style="margin-top: 10px;">
+                                            <button type="button" class="button" id="check-balance-btn"><?php _e('Check Balance', 'reunion-reg'); ?></button>
+                                            <button type="button" class="button" id="refresh-balance-btn" style="display: none;"><?php _e('Refresh', 'reunion-reg'); ?></button>
+                                        </div>
+                                        <div id="balance-error" style="display: none; margin-top: 10px; padding: 10px; background: #ffeaea; border: 1px solid #d63638; border-radius: 3px;">
+                                            <strong>Error:</strong> <span id="balance-error-message"></span>
+                                        </div>
                                     </td>
                                 </tr>
                             </table>
@@ -175,15 +181,22 @@
 
 <script>
 jQuery(document).ready(function($) {
-    // Check Balance
-    $('#check-balance-btn').on('click', function() {
+    // Check Balance - FIXED VERSION
+    $('#check-balance-btn, #refresh-balance-btn').on('click', function() {
         var btn = $(this);
         var spinner = $('#sms-balance-display .spinner');
         var balanceText = $('#balance-text');
+        var errorDiv = $('#balance-error');
+        var errorMessage = $('#balance-error-message');
+        var refreshBtn = $('#refresh-balance-btn');
         
-        btn.prop('disabled', true);
-        spinner.addClass('is-active');
-        balanceText.text('Checking...');
+        // Hide error div
+        errorDiv.hide();
+        
+        // Disable buttons and show spinner
+        $('#check-balance-btn, #refresh-balance-btn').prop('disabled', true);
+        spinner.show();
+        balanceText.text('Checking balance...');
         
         $.ajax({
             url: ajaxurl,
@@ -192,24 +205,56 @@ jQuery(document).ready(function($) {
                 action: 'reunion_check_sms_balance',
                 nonce: '<?php echo wp_create_nonce('reunion_sms_ajax'); ?>'
             },
+            timeout: 30000, // 30 seconds timeout
             success: function(response) {
-                if (response.success) {
-                    balanceText.html('<strong>Balance: ' + response.data.balance + '</strong>');
+                if (response.success && response.data && response.data.balance !== undefined) {
+                    var balance = response.data.balance;
+                    
+                    // Ensure balance is properly displayed
+                    if (typeof balance === 'object') {
+                        // If it's still an object, try to extract balance
+                        if (balance.balance !== undefined) {
+                            balance = balance.balance;
+                        } else {
+                            balance = 'Unable to parse balance';
+                        }
+                    }
+                    
+                    balanceText.html('<strong style="color: #00a32a;">Balance: ' + balance + ' SMS</strong>');
+                    refreshBtn.show();
                 } else {
-                    balanceText.html('<span style="color: red;">Error: ' + response.data.message + '</span>');
+                    var errorMsg = 'Unknown error occurred';
+                    if (response.data && response.data.message) {
+                        errorMsg = response.data.message;
+                    }
+                    balanceText.html('<span style="color: #d63638;">Failed to get balance</span>');
+                    errorMessage.text(errorMsg);
+                    errorDiv.show();
                 }
             },
-            error: function() {
-                balanceText.html('<span style="color: red;">Connection error</span>');
+            error: function(xhr, status, error) {
+                var errorMsg = 'Connection error';
+                if (status === 'timeout') {
+                    errorMsg = 'Request timeout. Please try again.';
+                } else if (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
+                    errorMsg = xhr.responseJSON.data.message;
+                } else if (error) {
+                    errorMsg = error;
+                }
+                
+                balanceText.html('<span style="color: #d63638;">Connection failed</span>');
+                errorMessage.text(errorMsg);
+                errorDiv.show();
             },
             complete: function() {
-                btn.prop('disabled', false);
-                spinner.removeClass('is-active');
+                // Re-enable buttons and hide spinner
+                $('#check-balance-btn, #refresh-balance-btn').prop('disabled', false);
+                spinner.hide();
             }
         });
     });
     
-    // Send Test SMS
+    // Send Test SMS - IMPROVED VERSION
     $('#send-test-sms-btn').on('click', function() {
         var btn = $(this);
         var phoneNumber = $('#test_sms_number').val();
@@ -220,8 +265,15 @@ jQuery(document).ready(function($) {
             return;
         }
         
+        // Validate phone number format
+        var phoneRegex = /^(\+88)?01[3-9]\d{8}$/;
+        if (!phoneRegex.test(phoneNumber.replace(/\s+/g, ''))) {
+            resultDiv.html('<div class="notice notice-error"><p>Please enter a valid Bangladesh phone number (01XXXXXXXXX)</p></div>');
+            return;
+        }
+        
         btn.prop('disabled', true).text('Sending...');
-        resultDiv.html('<div class="notice notice-info"><p>Sending SMS...</p></div>');
+        resultDiv.html('<div class="notice notice-info"><p><span class="spinner is-active" style="float: none; margin: 0 5px 0 0;"></span>Sending test SMS...</p></div>');
         
         $.ajax({
             url: ajaxurl,
@@ -231,20 +283,42 @@ jQuery(document).ready(function($) {
                 phone: phoneNumber,
                 nonce: '<?php echo wp_create_nonce('reunion_sms_ajax'); ?>'
             },
+            timeout: 30000,
             success: function(response) {
                 if (response.success) {
-                    resultDiv.html('<div class="notice notice-success"><p>' + response.data.message + '</p></div>');
+                    resultDiv.html('<div class="notice notice-success"><p><strong>✓ Success:</strong> ' + response.data.message + '</p></div>');
                 } else {
-                    resultDiv.html('<div class="notice notice-error"><p>Error: ' + response.data.message + '</p></div>');
+                    var errorMsg = response.data && response.data.message ? response.data.message : 'Unknown error occurred';
+                    resultDiv.html('<div class="notice notice-error"><p><strong>✗ Error:</strong> ' + errorMsg + '</p></div>');
                 }
             },
-            error: function() {
-                resultDiv.html('<div class="notice notice-error"><p>Connection error</p></div>');
+            error: function(xhr, status, error) {
+                var errorMsg = 'Connection error';
+                if (status === 'timeout') {
+                    errorMsg = 'Request timeout. Please try again.';
+                } else if (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
+                    errorMsg = xhr.responseJSON.data.message;
+                }
+                resultDiv.html('<div class="notice notice-error"><p><strong>✗ Connection Error:</strong> ' + errorMsg + '</p></div>');
             },
             complete: function() {
                 btn.prop('disabled', false).text('Send Test SMS');
             }
         });
+    });
+    
+    // Auto-format phone number
+    $('#test_sms_number').on('input', function() {
+        var value = $(this).val().replace(/\D/g, ''); // Remove non-digits
+        if (value.length > 11) {
+            value = value.substring(0, 11);
+        }
+        $(this).val(value);
+    });
+    
+    // Clear results when phone number changes
+    $('#test_sms_number').on('input', function() {
+        $('#test-sms-result').empty();
     });
 });
 </script>
@@ -256,7 +330,33 @@ jQuery(document).ready(function($) {
     gap: 10px;
     margin-bottom: 10px;
 }
+
 .postbox {
     margin-bottom: 20px;
+}
+
+.spinner.is-active {
+    visibility: visible;
+}
+
+#balance-error {
+    border-left: 4px solid #d63638;
+}
+
+.notice {
+    margin: 5px 0 15px 0;
+    padding: 1px 12px;
+}
+
+.form-table th {
+    width: 200px;
+}
+
+#test_sms_number {
+    font-family: monospace;
+}
+
+#refresh-balance-btn {
+    margin-left: 5px;
 }
 </style>

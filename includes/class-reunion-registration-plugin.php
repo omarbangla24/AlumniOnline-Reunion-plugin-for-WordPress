@@ -1,6 +1,6 @@
 <?php
 /**
- * Main Reunion Registration Plugin Class - Complete with All Features
+ * Main Reunion Registration Plugin Class - Complete with All Fixes
  */
 final class Reunion_Registration_Plugin {
 
@@ -358,6 +358,9 @@ final class Reunion_Registration_Plugin {
         }
     }
     
+    /**
+     * Handle edit submission - FIXED with better unique ID validation
+     */
     private function handle_edit_submission() { 
         global $wpdb;
         $id = intval($_POST['registration_id']);
@@ -380,16 +383,32 @@ final class Reunion_Registration_Plugin {
             'status' => sanitize_text_field($_POST['status'])
         ];
 
-        // Handle unique_id change
+        // Handle unique_id change with better validation
         if (isset($_POST['unique_id']) && !empty($_POST['unique_id'])) {
             $new_unique_id = sanitize_text_field($_POST['unique_id']);
-            // Check if new unique_id already exists for different record
-            $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->table_name} WHERE unique_id = %s AND id != %d", $new_unique_id, $id));
-            if (!$existing) {
-                $data['unique_id'] = $new_unique_id;
-            } else {
-                add_action('admin_notices', function(){ echo '<div class="notice notice-error is-dismissible"><p>' . __('Registration ID already exists!', 'reunion-reg') . '</p></div>'; });
-                return;
+            $current_unique_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT unique_id FROM {$this->table_name} WHERE id = %d", 
+                $id
+            ));
+            
+            // Only check for duplicates if the ID is actually changing
+            if ($new_unique_id !== $current_unique_id) {
+                $existing = $wpdb->get_var($wpdb->prepare(
+                    "SELECT id FROM {$this->table_name} WHERE unique_id = %s AND id != %d", 
+                    $new_unique_id, 
+                    $id
+                ));
+                
+                if ($existing) {
+                    add_action('admin_notices', function() use ($new_unique_id) { 
+                        echo '<div class="notice notice-error is-dismissible"><p>' . 
+                        sprintf(__('Registration ID "%s" already exists! Please choose a different ID.', 'reunion-reg'), esc_html($new_unique_id)) . 
+                        '</p></div>'; 
+                    });
+                    return;
+                } else {
+                    $data['unique_id'] = $new_unique_id;
+                }
             }
         }
 
@@ -403,9 +422,19 @@ final class Reunion_Registration_Plugin {
             if (!function_exists('wp_handle_upload')) { 
                 require_once(ABSPATH . 'wp-admin/includes/file.php'); 
             }
-            $movefile = wp_handle_upload($_FILES['new_profile_picture'], ['test_form' => false]);
+            
+            $upload_overrides = ['test_form' => false];
+            $movefile = wp_handle_upload($_FILES['new_profile_picture'], $upload_overrides);
+            
             if ($movefile && !isset($movefile['error'])) { 
                 $data['profile_picture_url'] = $movefile['url']; 
+            } else {
+                add_action('admin_notices', function() use ($movefile) {
+                    $error_message = isset($movefile['error']) ? $movefile['error'] : 'Unknown upload error';
+                    echo '<div class="notice notice-warning is-dismissible"><p>' . 
+                    sprintf(__('Profile picture upload failed: %s', 'reunion-reg'), esc_html($error_message)) . 
+                    '</p></div>';
+                });
             }
         }
         
@@ -436,10 +465,29 @@ final class Reunion_Registration_Plugin {
         }
         $data['payment_details'] = json_encode($payment_data);
         
-        if ($wpdb->update($this->table_name, $data, ['id' => $id])) { 
-            add_action('admin_notices', function(){ echo '<div class="notice notice-success is-dismissible"><p>' . __('Registration updated successfully!', 'reunion-reg') . '</p></div>'; }); 
+        // Perform the update
+        $result = $wpdb->update($this->table_name, $data, ['id' => $id]);
+        
+        if ($result !== false) { 
+            add_action('admin_notices', function(){ 
+                echo '<div class="notice notice-success is-dismissible"><p>' . 
+                __('Registration updated successfully!', 'reunion-reg') . 
+                '</p></div>'; 
+            }); 
+            
+            // If status changed to Paid, trigger SMS
+            if (isset($data['status']) && $data['status'] === 'Paid') {
+                $record = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE id = %d", $id), ARRAY_A);
+                if ($record) {
+                    do_action('reunion_status_changed_to_paid', $record, $id);
+                }
+            }
         } else { 
-            add_action('admin_notices', function(){ echo '<div class="notice notice-error is-dismissible"><p>' . __('Update failed.', 'reunion-reg') . '</p></div>'; }); 
+            add_action('admin_notices', function() use ($wpdb){ 
+                echo '<div class="notice notice-error is-dismissible"><p>' . 
+                sprintf(__('Update failed: %s', 'reunion-reg'), esc_html($wpdb->last_error)) . 
+                '</p></div>'; 
+            }); 
         }
     }
 
@@ -563,39 +611,10 @@ final class Reunion_Registration_Plugin {
     }
 
     /**
-     * Generate Registration ID based on format
+     * Generate Registration ID based on format - SIMPLIFIED VERSION
      */
     private function generate_registration_id($event_year) {
-        global $wpdb;
-        
-        $format = get_option('reunion_registration_id_format', 'YEAR0001');
-        
-        if (strpos($format, 'YEAR') !== false) {
-            // Get the next number for this year
-            $latest = $wpdb->get_var($wpdb->prepare(
-                "SELECT unique_id FROM {$this->table_name} WHERE event_year = %d ORDER BY id DESC LIMIT 1", 
-                $event_year
-            ));
-            
-            $next_number = 1;
-            if ($latest) {
-                // Extract number from existing ID
-                preg_match('/(\d+)$/', $latest, $matches);
-                if (!empty($matches[1])) {
-                    $next_number = intval($matches[1]) + 1;
-                }
-            }
-            
-            // Generate new ID
-            $number_part = str_pad($next_number, 4, '0', STR_PAD_LEFT);
-            $unique_id = str_replace('YEAR', $event_year, $format);
-            $unique_id = preg_replace('/0+$/', $number_part, $unique_id);
-            
-            return $unique_id;
-        }
-        
-        // Fallback to timestamp if format is invalid
-        return time();
+        return $this->generate_unique_registration_id($event_year);
     }
 
     public function registration_form_shortcode() {
@@ -639,82 +658,99 @@ final class Reunion_Registration_Plugin {
         return ob_get_clean();
     }
 
+    /**
+     * Handle public form submission - UPDATED VERSION
+     */
     public function handle_public_form_submission() {
         if (isset($_POST['action']) && $_POST['action'] === 'reunion_register' && check_admin_referer('reunion_reg_nonce')) {
             global $wpdb;
-            $data = [];
             
-            // Generate unique registration ID
-            $event_year = intval($_POST['event_year']);
-            $data['unique_id'] = $this->generate_registration_id($event_year);
-            
-            $data['name'] = sanitize_text_field($_POST['reg_name']);
-            $data['father_name'] = sanitize_text_field($_POST['father_name']);
-            $data['mother_name'] = sanitize_text_field($_POST['mother_name']);
-            $data['profession'] = sanitize_text_field($_POST['profession']);
-            $data['blood_group'] = sanitize_text_field($_POST['blood_group']);
-            $data['batch'] = intval($_POST['reg_batch']);
-            $data['tshirt_size'] = sanitize_text_field($_POST['tshirt_size']);
-            $data['event_year'] = $event_year;
-            $data['spouse_status'] = sanitize_text_field($_POST['spouse_status']);
-            $data['spouse_name'] = ($_POST['spouse_status'] === 'Yes') ? sanitize_text_field($_POST['spouse_name']) : null;
-            $data['child_status'] = sanitize_text_field($_POST['child_status']);
-            
-            $children = [];
-            if ($data['child_status'] === 'Yes' && !empty($_POST['child_name'])) {
-                for ($i = 0; $i < count($_POST['child_name']); $i++) { 
-                    $children[] = [
-                        'name' => sanitize_text_field($_POST['child_name'][$i]), 
-                        'dob' => sanitize_text_field($_POST['child_age'][$i])
+            try {
+                $data = [];
+                
+                // Generate unique registration ID
+                $event_year = intval($_POST['event_year']);
+                $data['unique_id'] = $this->generate_registration_id($event_year);
+                
+                $data['name'] = sanitize_text_field($_POST['reg_name']);
+                $data['father_name'] = sanitize_text_field($_POST['father_name']);
+                $data['mother_name'] = sanitize_text_field($_POST['mother_name']);
+                $data['profession'] = sanitize_text_field($_POST['profession']);
+                $data['blood_group'] = sanitize_text_field($_POST['blood_group']);
+                $data['batch'] = intval($_POST['reg_batch']);
+                $data['tshirt_size'] = sanitize_text_field($_POST['tshirt_size']);
+                $data['event_year'] = $event_year;
+                $data['spouse_status'] = sanitize_text_field($_POST['spouse_status']);
+                $data['spouse_name'] = ($_POST['spouse_status'] === 'Yes') ? sanitize_text_field($_POST['spouse_name']) : null;
+                $data['child_status'] = sanitize_text_field($_POST['child_status']);
+                
+                $children = [];
+                if ($data['child_status'] === 'Yes' && !empty($_POST['child_name'])) {
+                    for ($i = 0; $i < count($_POST['child_name']); $i++) { 
+                        if (!empty($_POST['child_name'][$i])) {
+                            $children[] = [
+                                'name' => sanitize_text_field($_POST['child_name'][$i]), 
+                                'dob' => sanitize_text_field($_POST['child_age'][$i])
+                            ]; 
+                        }
+                    }
+                }
+                $data['child_details'] = json_encode($children);
+                
+                $data['mobile_number'] = sanitize_text_field($_POST['mobile_number']);
+                
+                // Handle optional profile picture upload
+                $data['profile_picture_url'] = '';
+                if (!empty($_FILES['profile_picture']['name']) && $_FILES['profile_picture']['error'] === UPLOAD_ERR_OK) {
+                    if (!function_exists('wp_handle_upload')) { 
+                        require_once(ABSPATH . 'wp-admin/includes/file.php'); 
+                    }
+                    $movefile = wp_handle_upload($_FILES['profile_picture'], ['test_form' => false]);
+                    if ($movefile && !isset($movefile['error'])) { 
+                        $data['profile_picture_url'] = $movefile['url']; 
+                    }
+                }
+
+                $data['payment_method'] = sanitize_text_field($_POST['payment_method']);
+                $payment_data = [];
+                if ($data['payment_method'] === 'bKash') { 
+                    $payment_data = [
+                        'bkash_number' => sanitize_text_field($_POST['bkash_number']), 
+                        'transaction_id' => sanitize_text_field($_POST['transaction_id'])
+                    ]; 
+                } elseif ($data['payment_method'] === 'Bank') { 
+                    $payment_data = [
+                        'bank_account_name' => sanitize_text_field($_POST['bank_account_name']), 
+                        'bank_account_number' => sanitize_text_field($_POST['bank_account_number'])
                     ]; 
                 }
-            }
-            $data['child_details'] = json_encode($children);
-            
-            $data['mobile_number'] = sanitize_text_field($_POST['mobile_number']);
-            
-            // Handle optional profile picture upload
-            $data['profile_picture_url'] = '';
-            if (!empty($_FILES['profile_picture']['name']) && $_FILES['profile_picture']['error'] === UPLOAD_ERR_OK) {
-                if (!function_exists('wp_handle_upload')) { 
-                    require_once(ABSPATH . 'wp-admin/includes/file.php'); 
+                $data['payment_details'] = json_encode($payment_data);
+
+                $data['status'] = 'Pending';
+                $data['total_fee'] = floatval($_POST['total_fee']);
+                $data['registration_date'] = current_time('mysql');
+
+                // Insert into database
+                $result = $wpdb->insert($this->table_name, $data);
+
+                if ($result !== false) {
+                    $new_record_id = $wpdb->insert_id;
+                    $new_record = (object) $data;
+                    $new_record->id = $new_record_id;
+                    self::$newly_registered_record = $new_record;
+                    self::$form_message = '';
+                    
+                    // Trigger SMS notification
+                    do_action('reunion_after_registration', $data, $new_record_id);
+                } else { 
+                    throw new Exception('Database insertion failed: ' . $wpdb->last_error);
                 }
-                $movefile = wp_handle_upload($_FILES['profile_picture'], ['test_form' => false]);
-                if ($movefile && !isset($movefile['error'])) { 
-                    $data['profile_picture_url'] = $movefile['url']; 
-                }
-            }
-
-            $data['payment_method'] = sanitize_text_field($_POST['payment_method']);
-            $payment_data = [];
-            if ($data['payment_method'] === 'bKash') { 
-                $payment_data = [
-                    'bkash_number' => sanitize_text_field($_POST['bkash_number']), 
-                    'transaction_id' => sanitize_text_field($_POST['transaction_id'])
-                ]; 
-            } elseif ($data['payment_method'] === 'Bank') { 
-                $payment_data = [
-                    'bank_account_name' => sanitize_text_field($_POST['bank_account_name']), 
-                    'bank_account_number' => sanitize_text_field($_POST['bank_account_number'])
-                ]; 
-            }
-            $data['payment_details'] = json_encode($payment_data);
-
-            $data['status'] = 'Pending';
-            $data['total_fee'] = floatval($_POST['total_fee']);
-            $data['registration_date'] = current_time('mysql');
-
-            if ($wpdb->insert($this->table_name, $data)) {
-                $new_record_id = $wpdb->insert_id;
-                $new_record = (object) $data;
-                $new_record->profile_picture_url = $data['profile_picture_url'];
-                self::$newly_registered_record = $new_record;
-                self::$form_message = '';
                 
-                // Trigger SMS notification
-                do_action('reunion_after_registration', $data, $new_record_id);
-            } else { 
-                self::$form_message = '<div class="reunion-form"><div class="form-message error">' . __('Registration failed. Database Error: ' . $wpdb->last_error, 'reunion-reg') . '</div></div>';
+            } catch (Exception $e) {
+                error_log('Reunion Registration Error: ' . $e->getMessage());
+                self::$form_message = '<div class="reunion-form"><div class="form-message error">' . 
+                    __('Registration failed due to a technical issue. Please try again. If the problem persists, contact support.', 'reunion-reg') . 
+                    '<br><small>Error details have been logged for review.</small></div></div>';
             }
         }
     }
@@ -739,7 +775,7 @@ final class Reunion_Registration_Plugin {
     }
     
     /**
-     * AJAX handler for checking SMS balance
+     * AJAX handler for checking SMS balance - FIXED VERSION
      */
     public function ajax_check_sms_balance() {
         check_ajax_referer('reunion_sms_ajax', 'nonce');
@@ -752,7 +788,21 @@ final class Reunion_Registration_Plugin {
         $result = $sms->get_sms_balance();
         
         if ($result['status'] === 'success') {
-            wp_send_json_success(['balance' => $result['balance'] ?? $result['data']]);
+            $balance = $result['balance'];
+            
+            // Ensure balance is a string/number, not an object
+            if (is_array($balance) || is_object($balance)) {
+                // If it's still an object/array, try to extract the balance
+                if (is_array($balance) && isset($balance['balance'])) {
+                    $balance = $balance['balance'];
+                } elseif (is_object($balance) && isset($balance->balance)) {
+                    $balance = $balance->balance;
+                } else {
+                    $balance = 'Unable to parse balance';
+                }
+            }
+            
+            wp_send_json_success(['balance' => $balance]);
         } else {
             wp_send_json_error(['message' => $result['message']]);
         }
@@ -833,5 +883,79 @@ final class Reunion_Registration_Plugin {
     private function get_record_by_query($query) { 
         global $wpdb; 
         return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE unique_id = %s OR mobile_number = %s", $query, $query)); 
+    }
+
+    /**
+     * Check if registration ID is unique
+     */
+    private function is_unique_id_available($unique_id, $exclude_id = null) {
+        global $wpdb;
+        
+        $sql = "SELECT COUNT(*) FROM {$this->table_name} WHERE unique_id = %s";
+        $params = [$unique_id];
+        
+        if ($exclude_id) {
+            $sql .= " AND id != %d";
+            $params[] = $exclude_id;
+        }
+        
+        $count = $wpdb->get_var($wpdb->prepare($sql, $params));
+        return $count == 0;
+    }
+    
+    /**
+     * Generate a truly unique registration ID
+     */
+    private function generate_unique_registration_id($event_year, $max_attempts = 100) {
+        for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
+            $unique_id = $this->generate_registration_id_format($event_year, $attempt);
+            
+            if ($this->is_unique_id_available($unique_id)) {
+                return $unique_id;
+            }
+        }
+        
+        // Ultimate fallback - should never happen
+        return 'REG' . $event_year . '_' . time() . '_' . rand(1000, 9999);
+    }
+    
+    /**
+     * Generate registration ID based on format with attempt number
+     */
+    private function generate_registration_id_format($event_year, $attempt = 1) {
+        global $wpdb;
+        
+        $format = get_option('reunion_registration_id_format', 'YEAR0001');
+        
+        if (strpos($format, 'YEAR') !== false) {
+            // Get the next number for this year
+            $latest = $wpdb->get_var($wpdb->prepare(
+                "SELECT unique_id FROM {$this->table_name} WHERE event_year = %d AND unique_id LIKE %s ORDER BY id DESC LIMIT 1", 
+                $event_year,
+                str_replace('YEAR', $event_year, str_replace('0001', '%', $format))
+            ));
+            
+            $next_number = 1;
+            if ($latest) {
+                // Extract number from existing ID
+                preg_match('/(\d+)$/', $latest, $matches);
+                if (!empty($matches[1])) {
+                    $next_number = intval($matches[1]) + 1;
+                }
+            }
+            
+            // Add attempt offset to avoid duplicates
+            $next_number += ($attempt - 1);
+            
+            // Generate new ID
+            $number_part = str_pad($next_number, 4, '0', STR_PAD_LEFT);
+            $unique_id = str_replace('YEAR', $event_year, $format);
+            $unique_id = preg_replace('/0+$/', $number_part, $unique_id);
+            
+            return $unique_id;
+        }
+        
+        // Fallback format
+        return $event_year . str_pad($attempt, 4, '0', STR_PAD_LEFT);
     }
 }

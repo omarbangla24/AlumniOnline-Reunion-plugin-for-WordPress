@@ -1,6 +1,6 @@
 <?php
 /**
- * Fixed Admin Edit View with Registration ID Edit
+ * Complete Admin Edit View File
  * File: views/admin-edit-view.php
  */
 
