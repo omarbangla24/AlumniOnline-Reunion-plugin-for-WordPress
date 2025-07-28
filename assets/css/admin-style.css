@@ -59,15 +59,259 @@
     background-color: #000874;
     transition: background-color 0.3s, color 0.3s;
 }
-/* Reunion Admin Style */
 
-/* Reunion Admin Style */
+/* Export Actions */
+.export-actions {
+    display: inline-block;
+    margin-left: 10px;
+}
 
-.reunion-pagination { margin-top: 15px; }
-.reunion-pagination .page-numbers { display: inline-block; padding: 8px 14px; margin: 0 2px; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #555; background-color: #f7f7f7; transition: background-color 0.3s, color 0.3s; }
-.reunion-pagination .page-numbers:hover { background-color: #0073aa; color: #fff; border-color: #0073aa; }
-.reunion-pagination .page-numbers.current { background-color: #0073aa; color: #fff; border-color: #0073aa; font-weight: bold; }
-.reunion-pagination .page-numbers.dots { border: none; background: none; padding: 8px 4px; }
-#poststuff #post-body.columns-2 #postbox-container-1 { float: right; margin-right: -300px; width: 280px; }
-#poststuff #post-body.columns-2 #post-body-content { margin-right: 300px; }
-#poststuff #post-body #post-body-content { margin-bottom: 0; }
+.export-actions a {
+    margin-left: 5px;
+    text-decoration: none;
+}
+
+.export-actions a:hover {
+    background-color: #0073aa;
+    color: white;
+}
+
+/* Status Colors */
+.status-paid {
+    color: #008000;
+    font-weight: bold;
+}
+
+.status-pending {
+    color: #ff8c00;
+    font-weight: bold;
+}
+
+.status-cancelled {
+    color: #d63638;
+    font-weight: bold;
+}
+
+/* Button Styles */
+.button-danger {
+    background-color: #d63638 !important;
+    border-color: #d63638 !important;
+    color: #fff !important;
+}
+
+.button-danger:hover {
+    background-color: #b32d2e !important;
+    border-color: #b32d2e !important;
+}
+
+/* Filter Section */
+.tablenav .alignright {
+    float: right;
+}
+
+.tablenav .alignleft.actions select {
+    margin-right: 5px;
+}
+
+/* Admin List Table Improvements */
+.wp-list-table th,
+.wp-list-table td {
+    vertical-align: middle;
+}
+
+.wp-list-table .column-cb {
+    width: 30px;
+}
+
+/* Profile Picture Indicator */
+.has-photo {
+    color: #008000;
+    font-size: 12px;
+}
+
+.no-photo {
+    color: #d63638;
+    font-size: 12px;
+}
+
+/* Form Required Fields */
+.required-field {
+    color: #d63638;
+    font-weight: bold;
+}
+
+/* Admin Notices */
+.notice.notice-success {
+    border-left-color: #00a32a;
+}
+
+.notice.notice-error {
+    border-left-color: #d63638;
+}
+
+.notice.notice-warning {
+    border-left-color: #dba617;
+}
+
+/* Fee Calculator Styles */
+.fee-calculator {
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    margin: 15px 0;
+}
+
+.fee-breakdown {
+    margin-top: 10px;
+}
+
+.fee-breakdown p {
+    margin: 5px 0;
+}
+
+.fee-total {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #d63638;
+    border-top: 1px solid #ddd;
+    padding-top: 10px;
+    margin-top: 10px;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .export-actions {
+        display: block;
+        margin: 10px 0;
+    }
+    
+    .export-actions a {
+        display: block;
+        margin: 5px 0;
+        text-align: center;
+    }
+    
+    .tablenav .alignright {
+        float: none;
+        text-align: center;
+    }
+    
+    .wp-list-table {
+        font-size: 14px;
+    }
+    
+    .wp-list-table td,
+    .wp-list-table th {
+        padding: 8px 4px;
+    }
+}
+
+/* Custom Registration ID Display */
+.registration-id {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid #ddd;
+}
+
+/* Payment Method Badges */
+.payment-method-bkash {
+    background: #e91e63;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.payment-method-bank {
+    background: #2196f3;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+/* Settings Page Enhancements */
+.form-table th {
+    width: 200px;
+}
+
+.form-table .description {
+    font-style: italic;
+    color: #666;
+    margin-top: 5px;
+}
+
+/* Bulk Actions Enhancement */
+.bulkactions select,
+.bulkactions .button {
+    vertical-align: top;
+}
+
+/* Status Update Links */
+.row-actions a {
+    color: #0073aa;
+    text-decoration: none;
+}
+
+.row-actions a:hover {
+    color: #d63638;
+}
+
+/* Export Button Styling */
+.export-button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+    text-decoration: none;
+    display: inline-block;
+    margin: 0 5px;
+    transition: all 0.3s ease;
+}
+
+.export-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    color: white;
+    text-decoration: none;
+}
+
+.export-button.excel {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+}
+
+.export-button.pdf {
+    background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+}
+
+/* Loading States */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

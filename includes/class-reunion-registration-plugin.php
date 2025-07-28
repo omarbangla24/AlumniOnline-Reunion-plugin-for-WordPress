@@ -8,14 +8,13 @@ final class Reunion_Registration_Plugin {
     private $table_name;
     private $db_version = '1.4';
     private static $form_message = '';
-    
-    // ১. এই নতুন লাইনটি যোগ করা হয়েছে। এটি নতুন রেজিস্ট্রেশনের তথ্য ধরে রাখে।
     private static $newly_registered_record = null;
 
     private function __construct() {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'reunion_registrations';
         $this->load_hooks();
+        $this->init_sms(); // SMS initialization
     }
 
     public static function get_instance() {
@@ -33,6 +32,18 @@ final class Reunion_Registration_Plugin {
         add_shortcode('reunion_registration_form', [$this, 'registration_form_shortcode']);
         add_shortcode('reunion_acknowledgement_slip', [$this, 'acknowledgement_slip_shortcode']);
         add_shortcode('reunion_rules_page', [$this, 'rules_page_shortcode']);
+        
+        // SMS AJAX handlers
+        add_action('wp_ajax_reunion_check_sms_balance', [$this, 'ajax_check_sms_balance']);
+        add_action('wp_ajax_reunion_send_test_sms', [$this, 'ajax_send_test_sms']);
+    }
+    
+    /**
+     * Initialize SMS functionality
+     */
+    private function init_sms() {
+        require_once REUNION_REG_PLUGIN_DIR . 'includes/class-reunion-sms.php';
+        Reunion_SMS::get_instance();
     }
     
     public function enqueue_admin_styles($hook_suffix) {
@@ -72,6 +83,10 @@ final class Reunion_Registration_Plugin {
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
         update_option('reunion_reg_db_version', '1.4');
+        
+        // Create SMS log table
+        require_once REUNION_REG_PLUGIN_DIR . 'includes/class-reunion-sms.php';
+        Reunion_SMS::create_sms_log_table();
     }
 
     public function update_db_check() {
@@ -85,6 +100,8 @@ final class Reunion_Registration_Plugin {
         add_submenu_page('reunion-registrations', __('All Registrations', 'reunion-reg'), __('All Registrations', 'reunion-reg'), 'manage_options', 'reunion-registrations');
         add_submenu_page('reunion-registrations', __('Reports', 'reunion-reg'), __('Reports', 'reunion-reg'), 'manage_options', 'reunion-reports', [$this, 'reports_page']);
         add_submenu_page('reunion-registrations', __('Settings', 'reunion-reg'), __('Settings', 'reunion-reg'), 'manage_options', 'reunion-settings', [$this, 'settings_page']);
+        add_submenu_page('reunion-registrations', __('SMS Settings', 'reunion-reg'), __('SMS Settings', 'reunion-reg'), 'manage_options', 'reunion-sms-settings', [$this, 'sms_settings_page']);
+        add_submenu_page('reunion-registrations', __('SMS Logs', 'reunion-reg'), __('SMS Logs', 'reunion-reg'), 'manage_options', 'reunion-sms-logs', [$this, 'sms_logs_page']);
     }
 
     public function admin_page_router() {
@@ -98,7 +115,19 @@ final class Reunion_Registration_Plugin {
         global $wpdb;
         if (isset($_GET['page']) && $_GET['page'] === 'reunion-registrations' && isset($_GET['action']) && $_GET['action'] === 'update_status' && isset($_GET['id']) && isset($_GET['new_status'])) {
             if (check_admin_referer('reunion_status_update_' . $_GET['id'])) {
-                $wpdb->update($this->table_name, ['status' => sanitize_text_field($_GET['new_status'])], ['id' => intval($_GET['id'])]);
+                $id = intval($_GET['id']);
+                $new_status = sanitize_text_field($_GET['new_status']);
+                
+                $wpdb->update($this->table_name, ['status' => $new_status], ['id' => $id]);
+                
+                // If status changed to Paid, trigger SMS
+                if ($new_status === 'Paid') {
+                    $record = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE id = %d", $id), ARRAY_A);
+                    if ($record) {
+                        do_action('reunion_status_changed_to_paid', $record, $id);
+                    }
+                }
+                
                 wp_safe_redirect(admin_url('admin.php?page=reunion-registrations&status_updated=1'));
                 exit;
             }
@@ -242,7 +271,6 @@ final class Reunion_Registration_Plugin {
         require_once REUNION_REG_PLUGIN_DIR . 'views/admin-settings-view.php';
     }
 
-    // ২. এই সম্পূর্ণ ফাংশনটি নতুন কোড দিয়ে প্রতিস্থাপন করা হয়েছে।
     public function registration_form_shortcode() {
         ob_start();
         
@@ -253,7 +281,7 @@ final class Reunion_Registration_Plugin {
     border-radius: 10px;
     border: 1px solid #7eb17e;
     text-align: center;
-">' . __('ধন্যবাদ আপনার রেজিস্ট্রেশন সফল হয়েছে। কর্তৃপক্ষ সর্বোচ্চ ২৪ ঘণ্টার মধ্যে আপনার তথ্য যাচাই করে রেজিস্ট্রেশন স্ট্যাটাস "Pending" থেকে "Paid" হিসেবে আপডেট করে দেবে।', 'reunion-reg') . '</div></div>';
+">' . __('ধন্যবাদ আপনার রেজিস্ট্রেশন সফল হয়েছে। কর্তৃপক্ষ সর্বোচ্চ ২৪ ঘণ্টার মধ্যে আপনার তথ্য যাচাই করে রেজিস্ট্রেশন স্ট্যাটাস "Pending" থেকে "Paid" হিসেবে আপডেট করে দেবে।', 'reunion-reg') . '</div></div>';
             echo $this->acknowledgement_slip_shortcode(['record' => self::$newly_registered_record]);
             self::$newly_registered_record = null;
         } else {
@@ -278,8 +306,6 @@ final class Reunion_Registration_Plugin {
         return ob_get_clean();
     }
 
-    // ৩. এই ফাংশনের ভেতরের if ব্লকের কোড পরিবর্তন করা হয়েছে।
- // Updated handle_public_form_submission method - replace in main plugin class
     public function handle_public_form_submission() {
         if (isset($_POST['action']) && $_POST['action'] === 'reunion_register' && check_admin_referer('reunion_reg_nonce')) {
             global $wpdb;
@@ -343,10 +369,14 @@ final class Reunion_Registration_Plugin {
             $data['registration_date'] = current_time('mysql');
 
             if ($wpdb->insert($this->table_name, $data)) {
+                $new_record_id = $wpdb->insert_id;
                 $new_record = (object) $data;
                 $new_record->profile_picture_url = $data['profile_picture_url'];
                 self::$newly_registered_record = $new_record;
                 self::$form_message = '';
+                
+                // Trigger SMS notification
+                do_action('reunion_after_registration', $data, $new_record_id);
             } else { 
                 self::$form_message = '<div class="reunion-form"><div class="form-message error">' . __('Registration failed. Database Error: ' . $wpdb->last_error, 'reunion-reg') . '</div></div>';
             }
@@ -372,6 +402,100 @@ final class Reunion_Registration_Plugin {
         return ob_get_clean();
     }
     
-    private function get_record_by_id($id) { global $wpdb; return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE id = %d", $id)); }
-    private function get_record_by_query($query) { global $wpdb; return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE unique_id = %s OR mobile_number = %s", $query, $query)); }
+    /**
+     * AJAX handler for checking SMS balance
+     */
+    public function ajax_check_sms_balance() {
+        check_ajax_referer('reunion_sms_ajax', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        $sms = Reunion_SMS::get_instance();
+        $result = $sms->get_sms_balance();
+        
+        if ($result['status'] === 'success') {
+            wp_send_json_success(['balance' => $result['balance'] ?? $result['data']]);
+        } else {
+            wp_send_json_error(['message' => $result['message']]);
+        }
+    }
+    
+    /**
+     * AJAX handler for sending test SMS
+     */
+    public function ajax_send_test_sms() {
+        check_ajax_referer('reunion_sms_ajax', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        $phone = sanitize_text_field($_POST['phone']);
+        if (empty($phone)) {
+            wp_send_json_error(['message' => 'Phone number is required']);
+        }
+        
+        $sms = Reunion_SMS::get_instance();
+        $result = $sms->send_test_sms($phone);
+        
+        if ($result['status'] === 'success') {
+            wp_send_json_success(['message' => $result['message']]);
+        } else {
+            wp_send_json_error(['message' => $result['message']]);
+        }
+    }
+    
+    /**
+     * SMS Settings Page
+     */
+    public function sms_settings_page() {
+        if (isset($_POST['reunion_save_sms_settings']) && check_admin_referer('reunion_sms_settings_nonce')) {
+            update_option('reunion_sms_enabled', isset($_POST['reunion_sms_enabled']) ? 'yes' : 'no');
+            update_option('reunion_sms_token', sanitize_text_field($_POST['reunion_sms_token']));
+            update_option('reunion_sms_registration_template', wp_kses_post($_POST['reunion_sms_registration_template']));
+            update_option('reunion_sms_paid_template', wp_kses_post($_POST['reunion_sms_paid_template']));
+            
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>' . __('SMS settings saved successfully!', 'reunion-reg') . '</p></div>';
+            });
+        }
+        
+        require_once REUNION_REG_PLUGIN_DIR . 'views/admin-sms-settings-view.php';
+    }
+    
+    /**
+     * SMS Logs Page
+     */
+    public function sms_logs_page() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'reunion_sms_logs';
+        
+        $per_page = 20;
+        $current_page = isset($_GET['paged']) ? absint($_GET['paged']) : 1;
+        $offset = ($current_page - 1) * $per_page;
+        
+        $total_items = $wpdb->get_var("SELECT COUNT(id) FROM {$table_name}");
+        $logs = $wpdb->get_results($wpdb->prepare(
+            "SELECT l.*, r.name, r.unique_id 
+             FROM {$table_name} l 
+             LEFT JOIN {$this->table_name} r ON l.registration_id = r.id 
+             ORDER BY l.sent_at DESC 
+             LIMIT %d, %d",
+            $offset, $per_page
+        ));
+        
+        require_once REUNION_REG_PLUGIN_DIR . 'views/admin-sms-logs-view.php';
+    }
+    
+    private function get_record_by_id($id) { 
+        global $wpdb; 
+        return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE id = %d", $id)); 
+    }
+    
+    private function get_record_by_query($query) { 
+        global $wpdb; 
+        return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE unique_id = %s OR mobile_number = %s", $query, $query)); 
+    }
 }
