@@ -1,6 +1,6 @@
 <?php
 /**
- * Main Reunion Registration Plugin Class.
+ * Main Reunion Registration Plugin Class - Complete with All Features
  */
 final class Reunion_Registration_Plugin {
 
@@ -27,6 +27,7 @@ final class Reunion_Registration_Plugin {
     private function load_hooks() {
         add_action('init', [$this, 'handle_public_form_submission']);
         add_action('admin_init', [$this, 'handle_admin_redirect_actions']);
+        add_action('admin_init', [$this, 'handle_export_requests']); // Export handler
         add_action('admin_menu', [$this, 'admin_menu']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_styles']);
         add_shortcode('reunion_registration_form', [$this, 'registration_form_shortcode']);
@@ -110,6 +111,211 @@ final class Reunion_Registration_Plugin {
         elseif (isset($_GET['edit_id'])) { $this->display_edit_form(intval($_GET['edit_id'])); } 
         else { $this->display_list_page(); }
     }
+
+    /**
+     * Handle Export Requests (Excel/PDF)
+     */
+    public function handle_export_requests() {
+        if (!isset($_GET['page']) || $_GET['page'] !== 'reunion-registrations' || !isset($_GET['export'])) {
+            return;
+        }
+
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have sufficient permissions to access this page.'));
+        }
+
+        global $wpdb;
+        
+        // Get filters
+        $search_term = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+        $batch_filter = isset($_GET['batch_filter']) ? intval($_GET['batch_filter']) : '';
+        $year_filter = isset($_GET['year_filter']) ? intval($_GET['year_filter']) : '';
+        $status_filter = isset($_GET['status_filter']) ? sanitize_text_field($_GET['status_filter']) : '';
+        
+        // Build WHERE clause
+        $where = []; $params = [];
+        if ($search_term) { $where[] = "(name LIKE %s OR unique_id LIKE %s OR mobile_number LIKE %s)"; $like = '%' . $wpdb->esc_like($search_term) . '%'; $params[] = $like; $params[] = $like; $params[] = $like; }
+        if ($batch_filter) { $where[] = "batch = %d"; $params[] = $batch_filter; }
+        if ($year_filter) { $where[] = "event_year = %d"; $params[] = $year_filter; }
+        if ($status_filter) { $where[] = "status = %s"; $params[] = $status_filter; }
+        
+        $sql_where = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $results = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->table_name} {$sql_where} ORDER BY registration_date DESC", $params));
+
+        $export_type = sanitize_text_field($_GET['export']);
+        
+        if ($export_type === 'excel') {
+            $this->export_to_excel($results);
+        } elseif ($export_type === 'pdf') {
+            $this->export_to_pdf($results);
+        }
+    }
+
+    /**
+     * Export to Excel
+     */
+    private function export_to_excel($data) {
+        $filename = 'reunion-registrations-' . date('Y-m-d') . '.csv';
+        
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename=' . $filename);
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        
+        $output = fopen('php://output', 'w');
+        
+        // Add BOM for proper UTF-8 encoding in Excel
+        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+        
+        // Headers
+        $headers = [
+            'Registration ID',
+            'Name',
+            'Father Name',
+            'Mother Name',
+            'Profession',
+            'Blood Group',
+            'Batch',
+            'Event Year',
+            'T-Shirt Size',
+            'Mobile Number',
+            'Spouse Status',
+            'Spouse Name',
+            'Child Status',
+            'Child Details',
+            'Payment Method',
+            'Payment Details',
+            'Total Fee',
+            'Status',
+            'Registration Date'
+        ];
+        
+        fputcsv($output, $headers);
+        
+        // Data rows
+        foreach ($data as $row) {
+            $child_details = '';
+            if (!empty($row->child_details)) {
+                $children = json_decode($row->child_details, true);
+                if (is_array($children)) {
+                    $child_names = [];
+                    foreach ($children as $child) {
+                        $child_names[] = $child['name'] . ' (' . $child['dob'] . ')';
+                    }
+                    $child_details = implode(', ', $child_names);
+                }
+            }
+            
+            $payment_details = '';
+            if (!empty($row->payment_details)) {
+                $payment = json_decode($row->payment_details, true);
+                if (is_array($payment)) {
+                    if ($row->payment_method === 'bKash') {
+                        $payment_details = 'Number: ' . ($payment['bkash_number'] ?? '') . ', TrxID: ' . ($payment['transaction_id'] ?? '');
+                    } elseif ($row->payment_method === 'Bank') {
+                        $payment_details = 'A/C Name: ' . ($payment['bank_account_name'] ?? '') . ', A/C No: ' . ($payment['bank_account_number'] ?? '');
+                    }
+                }
+            }
+            
+            $csv_row = [
+                $row->unique_id,
+                $row->name,
+                $row->father_name,
+                $row->mother_name,
+                $row->profession,
+                $row->blood_group,
+                $row->batch,
+                $row->event_year,
+                $row->tshirt_size,
+                $row->mobile_number,
+                $row->spouse_status,
+                $row->spouse_name,
+                $row->child_status,
+                $child_details,
+                $row->payment_method,
+                $payment_details,
+                number_format((float)$row->total_fee, 2),
+                $row->status,
+                date('Y-m-d H:i:s', strtotime($row->registration_date))
+            ];
+            
+            fputcsv($output, $csv_row);
+        }
+        
+        fclose($output);
+        exit;
+    }
+
+    /**
+     * Export to PDF
+     */
+    private function export_to_pdf($data) {
+        ob_start();
+        ?>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Reunion Registrations Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; }
+                h1 { text-align: center; color: #333; margin-bottom: 30px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; font-weight: bold; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
+                .status-paid { color: green; font-weight: bold; }
+                .status-pending { color: orange; font-weight: bold; }
+                .status-cancelled { color: red; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <h1>Reunion Registrations Report</h1>
+            <p><strong>Generated:</strong> <?php echo date('F d, Y H:i:s'); ?></p>
+            <p><strong>Total Records:</strong> <?php echo count($data); ?></p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Batch</th>
+                        <th>Mobile</th>
+                        <th>Payment</th>
+                        <th>Fee</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($data as $row): ?>
+                    <tr>
+                        <td><?php echo esc_html($row->unique_id); ?></td>
+                        <td><?php echo esc_html($row->name); ?></td>
+                        <td><?php echo esc_html($row->batch); ?></td>
+                        <td><?php echo esc_html($row->mobile_number); ?></td>
+                        <td><?php echo esc_html($row->payment_method); ?></td>
+                        <td><?php echo number_format((float)$row->total_fee, 2); ?> BDT</td>
+                        <td class="status-<?php echo strtolower($row->status); ?>">
+                            <?php echo esc_html($row->status); ?>
+                        </td>
+                        <td><?php echo date('d M Y', strtotime($row->registration_date)); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </body>
+        </html>
+        <?php
+        $html = ob_get_clean();
+        
+        header('Content-Type: text/html; charset=utf-8');
+        header('Content-Disposition: inline; filename="reunion-registrations-' . date('Y-m-d') . '.html"');
+        
+        echo $html;
+        exit;
+    }
     
     public function handle_admin_redirect_actions() {
         global $wpdb;
@@ -155,30 +361,86 @@ final class Reunion_Registration_Plugin {
     private function handle_edit_submission() { 
         global $wpdb;
         $id = intval($_POST['registration_id']);
+        
         $data = [
             'name' => sanitize_text_field($_POST['reg_name']),
             'father_name' => sanitize_text_field($_POST['father_name']),
             'mother_name' => sanitize_text_field($_POST['mother_name']),
             'profession' => sanitize_text_field($_POST['profession']),
             'blood_group' => sanitize_text_field($_POST['blood_group']),
-            'batch' => intval($_POST['reg_batch']), 'event_year' => intval($_POST['event_year']),
-            'tshirt_size' => sanitize_text_field($_POST['tshirt_size']), 'spouse_status' => sanitize_text_field($_POST['spouse_status']), 
+            'batch' => intval($_POST['reg_batch']), 
+            'event_year' => intval($_POST['event_year']),
+            'tshirt_size' => sanitize_text_field($_POST['tshirt_size']), 
+            'spouse_status' => sanitize_text_field($_POST['spouse_status']), 
             'spouse_name' => ($_POST['spouse_status'] === 'Yes') ? sanitize_text_field($_POST['spouse_name']) : null,
-            'child_status' => sanitize_text_field($_POST['child_status']), 'mobile_number' => sanitize_text_field($_POST['mobile_number']),
-            'payment_method' => sanitize_text_field($_POST['payment_method']), 'total_fee' => floatval($_POST['total_fee'])
+            'child_status' => sanitize_text_field($_POST['child_status']), 
+            'mobile_number' => sanitize_text_field($_POST['mobile_number']),
+            'payment_method' => sanitize_text_field($_POST['payment_method']), 
+            'total_fee' => floatval($_POST['total_fee']),
+            'status' => sanitize_text_field($_POST['status'])
         ];
+
+        // Handle unique_id change
+        if (isset($_POST['unique_id']) && !empty($_POST['unique_id'])) {
+            $new_unique_id = sanitize_text_field($_POST['unique_id']);
+            // Check if new unique_id already exists for different record
+            $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->table_name} WHERE unique_id = %s AND id != %d", $new_unique_id, $id));
+            if (!$existing) {
+                $data['unique_id'] = $new_unique_id;
+            } else {
+                add_action('admin_notices', function(){ echo '<div class="notice notice-error is-dismissible"><p>' . __('Registration ID already exists!', 'reunion-reg') . '</p></div>'; });
+                return;
+            }
+        }
+
+        // Handle profile picture URL update
+        if (isset($_POST['profile_picture_url'])) {
+            $data['profile_picture_url'] = sanitize_url($_POST['profile_picture_url']);
+        }
+
+        // Handle new profile picture upload
+        if (!empty($_FILES['new_profile_picture']['name']) && $_FILES['new_profile_picture']['error'] === UPLOAD_ERR_OK) {
+            if (!function_exists('wp_handle_upload')) { 
+                require_once(ABSPATH . 'wp-admin/includes/file.php'); 
+            }
+            $movefile = wp_handle_upload($_FILES['new_profile_picture'], ['test_form' => false]);
+            if ($movefile && !isset($movefile['error'])) { 
+                $data['profile_picture_url'] = $movefile['url']; 
+            }
+        }
+        
         $children = [];
         if ($data['child_status'] === 'Yes' && !empty($_POST['child_name'])) {
-            for ($i = 0; $i < count($_POST['child_name']); $i++) { if (!empty($_POST['child_name'][$i])) { $children[] = ['name' => sanitize_text_field($_POST['child_name'][$i]), 'dob' => sanitize_text_field($_POST['child_age'][$i])]; } }
+            for ($i = 0; $i < count($_POST['child_name']); $i++) { 
+                if (!empty($_POST['child_name'][$i])) { 
+                    $children[] = [
+                        'name' => sanitize_text_field($_POST['child_name'][$i]), 
+                        'dob' => sanitize_text_field($_POST['child_age'][$i])
+                    ]; 
+                } 
+            }
         }
         $data['child_details'] = json_encode($children);
+        
         $payment_data = [];
-        if ($data['payment_method'] === 'bKash') { $payment_data = ['bkash_number' => sanitize_text_field($_POST['bkash_number']), 'transaction_id' => sanitize_text_field($_POST['transaction_id'])]; } 
-        elseif ($data['payment_method'] === 'Bank') { $payment_data = ['bank_account_name' => sanitize_text_field($_POST['bank_account_name']), 'bank_account_number' => sanitize_text_field($_POST['bank_account_number'])]; }
+        if ($data['payment_method'] === 'bKash') { 
+            $payment_data = [
+                'bkash_number' => sanitize_text_field($_POST['bkash_number']), 
+                'transaction_id' => sanitize_text_field($_POST['transaction_id'])
+            ]; 
+        } elseif ($data['payment_method'] === 'Bank') { 
+            $payment_data = [
+                'bank_account_name' => sanitize_text_field($_POST['bank_account_name']), 
+                'bank_account_number' => sanitize_text_field($_POST['bank_account_number'])
+            ]; 
+        }
         $data['payment_details'] = json_encode($payment_data);
         
-        if ($wpdb->update($this->table_name, $data, ['id' => $id])) { add_action('admin_notices', function(){ echo '<div class="notice notice-success is-dismissible"><p>' . __('Registration updated successfully!', 'reunion-reg') . '</p></div>'; }); } 
-        else { add_action('admin_notices', function(){ echo '<div class="notice notice-error is-dismissible"><p>' . __('Update failed.', 'reunion-reg') . '</p></div>'; }); }
+        if ($wpdb->update($this->table_name, $data, ['id' => $id])) { 
+            add_action('admin_notices', function(){ echo '<div class="notice notice-success is-dismissible"><p>' . __('Registration updated successfully!', 'reunion-reg') . '</p></div>'; }); 
+        } else { 
+            add_action('admin_notices', function(){ echo '<div class="notice notice-error is-dismissible"><p>' . __('Update failed.', 'reunion-reg') . '</p></div>'; }); 
+        }
     }
 
     private function display_list_page() {
@@ -186,17 +448,25 @@ final class Reunion_Registration_Plugin {
         $this->handle_page_actions();
         if (isset($_GET['status_updated'])) { add_action('admin_notices', function(){ echo '<div class="notice notice-success is-dismissible"><p>' . __('Status updated successfully!', 'reunion-reg') . '</p></div>'; }); }
         
-        $search_term = isset($_REQUEST['s']) ? sanitize_text_field($_REQUEST['s']) : ''; $batch_filter = isset($_REQUEST['batch_filter']) ? intval($_REQUEST['batch_filter']) : ''; $year_filter = isset($_REQUEST['year_filter']) ? intval($_REQUEST['year_filter']) : '';
+        $search_term = isset($_REQUEST['s']) ? sanitize_text_field($_REQUEST['s']) : ''; 
+        $batch_filter = isset($_REQUEST['batch_filter']) ? intval($_REQUEST['batch_filter']) : ''; 
+        $year_filter = isset($_REQUEST['year_filter']) ? intval($_REQUEST['year_filter']) : '';
+        $status_filter = isset($_REQUEST['status_filter']) ? sanitize_text_field($_REQUEST['status_filter']) : '';
+        
         $where = []; $params = [];
         if ($search_term) { $where[] = "(name LIKE %s OR unique_id LIKE %s OR mobile_number LIKE %s)"; $like = '%' . $wpdb->esc_like($search_term) . '%'; $params[] = $like; $params[] = $like; $params[] = $like; }
         if ($batch_filter) { $where[] = "batch = %d"; $params[] = $batch_filter; }
         if ($year_filter) { $where[] = "event_year = %d"; $params[] = $year_filter; }
+        if ($status_filter) { $where[] = "status = %s"; $params[] = $status_filter; }
+        
         $sql_where = $where ? ' WHERE ' . implode(' AND ', $where) : '';
         $per_page = 20; $current_page = isset($_GET['paged']) ? absint($_GET['paged']) : 1; $offset = ($current_page - 1) * $per_page;
         $total_items = $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM {$this->table_name} {$sql_where}", $params));
         $results = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->table_name} {$sql_where} ORDER BY registration_date DESC LIMIT %d, %d", array_merge($params, [$offset, $per_page])));
         $batches = $wpdb->get_col("SELECT DISTINCT batch FROM {$this->table_name} ORDER BY batch DESC");
         $event_years = $wpdb->get_col("SELECT DISTINCT event_year FROM {$this->table_name} ORDER BY event_year DESC");
+        $statuses = ['Pending', 'Paid', 'Cancelled'];
+        
         require_once REUNION_REG_PLUGIN_DIR . 'views/admin-list-view.php';
     }
 
@@ -251,6 +521,7 @@ final class Reunion_Registration_Plugin {
     
     public function settings_page() {
         if (isset($_POST['reunion_save_settings']) && check_admin_referer('reunion_settings_nonce')) {
+            // Save all settings
             update_option('reunion_logo_url', sanitize_url($_POST['reunion_logo_url']));
             update_option('reunion_registration_fee', sanitize_text_field($_POST['reunion_registration_fee']));
             update_option('reunion_spouse_fee', sanitize_text_field($_POST['reunion_spouse_fee']));
@@ -259,16 +530,72 @@ final class Reunion_Registration_Plugin {
             update_option('reunion_current_event_year', intval($_POST['reunion_current_event_year']));
             update_option('reunion_bkash_details', sanitize_text_field($_POST['reunion_bkash_details']));
             update_option('reunion_bank_details', wp_kses_post($_POST['reunion_bank_details']));
-            add_action('admin_notices', function(){ echo '<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>'; });
+            
+            // Save Registration ID Format
+            update_option('reunion_registration_id_format', sanitize_text_field($_POST['reunion_registration_id_format'] ?? 'YEAR0001'));
+            
+            // Save bKash charge settings
+            update_option('reunion_bkash_charge_registration', sanitize_text_field($_POST['reunion_bkash_charge_registration'] ?? '0'));
+            update_option('reunion_bkash_charge_spouse', sanitize_text_field($_POST['reunion_bkash_charge_spouse'] ?? '0'));
+            update_option('reunion_bkash_charge_child', sanitize_text_field($_POST['reunion_bkash_charge_child'] ?? '0'));
+            
+            add_action('admin_notices', function(){ 
+                echo '<div class="notice notice-success is-dismissible"><p>Settings saved successfully!</p></div>'; 
+            });
         }
+        
         $settings = [
-            'logo_url' => get_option('reunion_logo_url', ''), 'reg_fee' => get_option('reunion_registration_fee', '2000'),
-            'spouse_fee' => get_option('reunion_spouse_fee', '1000'), 'child_fee' => get_option('reunion_child_fee', '500'),
+            'logo_url' => get_option('reunion_logo_url', ''), 
+            'reg_fee' => get_option('reunion_registration_fee', '2000'),
+            'spouse_fee' => get_option('reunion_spouse_fee', '1000'), 
+            'child_fee' => get_option('reunion_child_fee', '500'),
             'tshirt_sizes' => get_option('reunion_tshirt_sizes', 'S,M,L,XL,XXL'),
-            'event_year' => get_option('reunion_current_event_year', date('Y')), 'bkash_details' => get_option('reunion_bkash_details', ''),
+            'event_year' => get_option('reunion_current_event_year', date('Y')), 
+            'bkash_details' => get_option('reunion_bkash_details', ''),
             'bank_details' => get_option('reunion_bank_details', ''),
+            'registration_id_format' => get_option('reunion_registration_id_format', 'YEAR0001'),
+            'bkash_charge_registration' => get_option('reunion_bkash_charge_registration', '0'),
+            'bkash_charge_spouse' => get_option('reunion_bkash_charge_spouse', '0'),
+            'bkash_charge_child' => get_option('reunion_bkash_charge_child', '0'),
         ];
+        
         require_once REUNION_REG_PLUGIN_DIR . 'views/admin-settings-view.php';
+    }
+
+    /**
+     * Generate Registration ID based on format
+     */
+    private function generate_registration_id($event_year) {
+        global $wpdb;
+        
+        $format = get_option('reunion_registration_id_format', 'YEAR0001');
+        
+        if (strpos($format, 'YEAR') !== false) {
+            // Get the next number for this year
+            $latest = $wpdb->get_var($wpdb->prepare(
+                "SELECT unique_id FROM {$this->table_name} WHERE event_year = %d ORDER BY id DESC LIMIT 1", 
+                $event_year
+            ));
+            
+            $next_number = 1;
+            if ($latest) {
+                // Extract number from existing ID
+                preg_match('/(\d+)$/', $latest, $matches);
+                if (!empty($matches[1])) {
+                    $next_number = intval($matches[1]) + 1;
+                }
+            }
+            
+            // Generate new ID
+            $number_part = str_pad($next_number, 4, '0', STR_PAD_LEFT);
+            $unique_id = str_replace('YEAR', $event_year, $format);
+            $unique_id = preg_replace('/0+$/', $number_part, $unique_id);
+            
+            return $unique_id;
+        }
+        
+        // Fallback to timestamp if format is invalid
+        return time();
     }
 
     public function registration_form_shortcode() {
@@ -289,10 +616,16 @@ final class Reunion_Registration_Plugin {
                 echo self::$form_message;
             }
             $settings = [
-                'current_event_year' => get_option('reunion_current_event_year', date('Y')), 'reg_fee' => get_option('reunion_registration_fee', '2000'),
-                'spouse_fee' => get_option('reunion_spouse_fee', '1000'), 'child_fee' => get_option('reunion_child_fee', '500'),
+                'current_event_year' => get_option('reunion_current_event_year', date('Y')), 
+                'reg_fee' => get_option('reunion_registration_fee', '2000'),
+                'spouse_fee' => get_option('reunion_spouse_fee', '1000'), 
+                'child_fee' => get_option('reunion_child_fee', '500'),
                 'tshirt_sizes' => get_option('reunion_tshirt_sizes', 'S,M,L,XL,XXL'),
-                'bkash_details' => get_option('reunion_bkash_details', ''), 'bank_details' => get_option('reunion_bank_details', ''),
+                'bkash_details' => get_option('reunion_bkash_details', ''), 
+                'bank_details' => get_option('reunion_bank_details', ''),
+                'bkash_charge_registration' => get_option('reunion_bkash_charge_registration', '0'),
+                'bkash_charge_spouse' => get_option('reunion_bkash_charge_spouse', '0'),
+                'bkash_charge_child' => get_option('reunion_bkash_charge_child', '0'),
             ];
             require_once REUNION_REG_PLUGIN_DIR . 'views/public-registration-form.php';
         }
@@ -311,7 +644,10 @@ final class Reunion_Registration_Plugin {
             global $wpdb;
             $data = [];
             
-            $data['unique_id'] = time();
+            // Generate unique registration ID
+            $event_year = intval($_POST['event_year']);
+            $data['unique_id'] = $this->generate_registration_id($event_year);
+            
             $data['name'] = sanitize_text_field($_POST['reg_name']);
             $data['father_name'] = sanitize_text_field($_POST['father_name']);
             $data['mother_name'] = sanitize_text_field($_POST['mother_name']);
@@ -319,7 +655,7 @@ final class Reunion_Registration_Plugin {
             $data['blood_group'] = sanitize_text_field($_POST['blood_group']);
             $data['batch'] = intval($_POST['reg_batch']);
             $data['tshirt_size'] = sanitize_text_field($_POST['tshirt_size']);
-            $data['event_year'] = intval($_POST['event_year']);
+            $data['event_year'] = $event_year;
             $data['spouse_status'] = sanitize_text_field($_POST['spouse_status']);
             $data['spouse_name'] = ($_POST['spouse_status'] === 'Yes') ? sanitize_text_field($_POST['spouse_name']) : null;
             $data['child_status'] = sanitize_text_field($_POST['child_status']);
