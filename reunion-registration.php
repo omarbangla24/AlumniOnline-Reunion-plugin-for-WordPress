@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Reunion Registration
  * Description: A plugin for managing reunion event registrations, including a registration form, admin data view, and PDF acknowledgement slip generation.
- * Version: 3.7.0
+ * Version: 3.8.0
  * Author: Omar Faruk
  * Text Domain: reunion-reg
  * Author URI: https://logicean.com
